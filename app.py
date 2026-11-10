@@ -13,35 +13,34 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# 1. Kiwi 형태소 분석기 및 지능형 띄어쓰기 엔진 초기화
-kiwi = Kiwi()
+# 1. Kiwi 형태소 분석기 안전 초기화 (메모리 사용량 최소화 및 로딩 에러 방지)
+try:
+    kiwi = Kiwi(options=0)
+except Exception as e:
+    print(f"Kiwi initialization error: {e}")
+    kiwi = None
 
 def register_korean_font():
-    """PDF 출력을 위한 한글 폰트 등록 (프로젝트 내부 폰트 우선 탐색)"""
+    """한글 PDF 출력을 위한 시스템 폰트 등록"""
     font_paths = [
-        "fonts/NanumGothic.ttf",                                # 1순위: 프로젝트 폴더 내부 폰트 (가장 안전)
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",       # 2순위: 리눅스 시스템 폰트
-        "C:\\Windows\\Fonts\\malgun.ttf",                        # 윈도우 로컬
-        "/System/Library/Fonts/Supplemental/AppleGothic.ttf"    # 맥 로컬
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/nanum/NanumGothic.ttf",
+        "C:\\Windows\\Fonts\\malgun.ttf",
+        "/System/Library/Fonts/Supplemental/AppleGothic.ttf"
     ]
-    
     font_name = "NanumGothic"
     registered = False
-    
     for path in font_paths:
         if os.path.exists(path):
             try:
                 pdfmetrics.registerFont(TTFont(font_name, path))
                 registered = True
-                print(f"Successfully registered font from: {path}")
                 break
             except Exception as e:
-                print(f"Font loading error for {path}: {e}")
+                print(f"Font loading error: {e}")
     
     if not registered:
-        print("WARNING: Korean font not found! Fallback to Helvetica.")
         font_name = "Helvetica"
-        
     return font_name
 
 FONT_NAME = register_korean_font()
@@ -80,13 +79,15 @@ class NumberedCanvas(canvas.Canvas):
         self.restoreState()
 
 def fix_korean_spacing_with_kiwi(text):
+    """
+    Kiwi 형태소 분석기를 이용한 단어 사전 기반 한글 띄어쓰기 자동 교정
+    """
     if not text.strip():
         return text
     
-    # Kiwi 로딩 실패 시 기본 텍스트 반환 (서버 다운 방지)
     if kiwi is None:
         return text.strip()
-        
+
     try:
         corrected_text = kiwi.space(text)
         corrected_text = re.sub(r'\s+([,.\?!])', r'\1', corrected_text)
@@ -285,3 +286,7 @@ def export_pdf():
     except Exception as e:
         print(f"Error exporting PDF: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
