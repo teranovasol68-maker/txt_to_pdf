@@ -13,8 +13,12 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# 1. Kiwi 형태소 분석기 및 지능형 띄어쓰기 엔진 초기화
-kiwi = Kiwi()
+# 1. Kiwi 형태소 분석기 안전 초기화 (메모리 사용량 최소화 및 로딩 에러 방지)
+try:
+    kiwi = Kiwi(options=0)
+except Exception as e:
+    print(f"Kiwi initialization error: {e}")
+    kiwi = None
 
 def register_korean_font():
     """한글 PDF 출력을 위한 시스템 폰트 등록"""
@@ -77,17 +81,22 @@ class NumberedCanvas(canvas.Canvas):
 def fix_korean_spacing_with_kiwi(text):
     """
     Kiwi 형태소 분석기를 이용한 단어 사전 기반 한글 띄어쓰기 자동 교정
+    (로딩 실패 및 예외 발생 시 원본 텍스트 안전 반환)
     """
     if not text.strip():
         return text
     
-    # Kiwi의 지능형 띄어쓰기 교정 실행
-    corrected_text = kiwi.space(text)
-    
-    # 문장부호 앞뒤 불필요한 공백 정돈
-    corrected_text = re.sub(r'\s+([,.\?!])', r'\1', corrected_text)
-    corrected_text = re.sub(r'([\.?!])([^\s"\'\)\]])', r'\1 \2', corrected_text)
-    return corrected_text.strip()
+    if kiwi is None:
+        return text.strip()
+
+    try:
+        corrected_text = kiwi.space(text)
+        corrected_text = re.sub(r'\s+([,.\?!])', r'\1', corrected_text)
+        corrected_text = re.sub(r'([\.?!])([^\s"\'\)\]])', r'\1 \2', corrected_text)
+        return corrected_text.strip()
+    except Exception as e:
+        print(f"Spacing error: {e}")
+        return text.strip()
 
 def process_novel_text(text, options):
     """
@@ -189,87 +198,95 @@ def index():
 
 @app.route('/api/process', methods=['POST'])
 def process():
-    data = request.json or {}
-    raw_text = data.get('text', '')
-    options = {
-        'fix_spacing': data.get('fix_spacing', True),
-        'clean_paragraphs': data.get('clean_paragraphs', True),
-        'separate_dialogue': data.get('separate_dialogue', True),
-        'split_sentences': data.get('split_sentences', True)
-    }
-    
-    result_text = process_novel_text(raw_text, options)
-    return jsonify({'status': 'success', 'processed_text': result_text})
+    try:
+        data = request.json or {}
+        raw_text = data.get('text', '')
+        options = {
+            'fix_spacing': data.get('fix_spacing', True),
+            'clean_paragraphs': data.get('clean_paragraphs', True),
+            'separate_dialogue': data.get('separate_dialogue', True),
+            'split_sentences': data.get('split_sentences', True)
+        }
+        
+        result_text = process_novel_text(raw_text, options)
+        return jsonify({'status': 'success', 'processed_text': result_text})
+    except Exception as e:
+        print(f"Error processing text: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/export-pdf', methods=['POST'])
 def export_pdf():
-    data = request.json or {}
-    title = data.get('title', '소설 편집 본문').strip() or '소설 편집 본문'
-    text = data.get('text', '')
+    try:
+        data = request.json or {}
+        title = data.get('title', '소설 편집 본문').strip() or '소설 편집 본문'
+        text = data.get('text', '')
 
-    pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], 'novel_export.pdf')
-    
-    doc = SimpleDocTemplate(
-        pdf_path,
-        pagesize=A4,
-        leftMargin=40,
-        rightMargin=40,
-        topMargin=50,
-        bottomMargin=50
-    )
-
-    styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle(
-        'NovelTitle',
-        parent=styles['Heading1'],
-        fontName=FONT_NAME,
-        fontSize=20,
-        leading=26,
-        alignment=1,
-        spaceAfter=25
-    )
-    
-    narrative_style = ParagraphStyle(
-        'NovelNarrative',
-        parent=styles['Normal'],
-        fontName=FONT_NAME,
-        fontSize=10.5,
-        leading=17,
-        firstLineIndent=14,
-        spaceAfter=6,
-        textColor='#222222'
-    )
-    
-    dialogue_style = ParagraphStyle(
-        'NovelDialogue',
-        parent=styles['Normal'],
-        fontName=FONT_NAME,
-        fontSize=10.5,
-        leading=17,
-        leftIndent=15,
-        spaceAfter=8,
-        textColor='#003366'
-    )
-
-    story = [Paragraph(title, title_style), Spacer(1, 15)]
-
-    lines = text.splitlines()
-    for line in lines:
-        line_str = line.strip()
-        if not line_str:
-            story.append(Spacer(1, 6))
-            continue
+        pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], 'novel_export.pdf')
         
-        safe_line = line_str.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        
-        if safe_line.startswith(('"', "'", '“', '‘', '「', '『')):
-            story.append(Paragraph(safe_line, dialogue_style))
-        else:
-            story.append(Paragraph(safe_line, narrative_style))
+        doc = SimpleDocTemplate(
+            pdf_path,
+            pagesize=A4,
+            leftMargin=40,
+            rightMargin=40,
+            topMargin=50,
+            bottomMargin=50
+        )
 
-    doc.build(story, canvasmaker=NumberedCanvas)
-    return send_file(pdf_path, as_attachment=True, download_name=f"{title}.pdf")
+        styles = getSampleStyleSheet()
+        
+        title_style = ParagraphStyle(
+            'NovelTitle',
+            parent=styles['Heading1'],
+            fontName=FONT_NAME,
+            fontSize=20,
+            leading=26,
+            alignment=1,
+            spaceAfter=25
+        )
+        
+        narrative_style = ParagraphStyle(
+            'NovelNarrative',
+            parent=styles['Normal'],
+            fontName=FONT_NAME,
+            fontSize=10.5,
+            leading=17,
+            firstLineIndent=14,
+            spaceAfter=6,
+            textColor='#222222'
+        )
+        
+        dialogue_style = ParagraphStyle(
+            'NovelDialogue',
+            parent=styles['Normal'],
+            fontName=FONT_NAME,
+            fontSize=10.5,
+            leading=17,
+            leftIndent=15,
+            spaceAfter=8,
+            textColor='#003366'
+        )
+
+        story = [Paragraph(title, title_style), Spacer(1, 15)]
+
+        lines = text.splitlines()
+        for line in lines:
+            line_str = line.strip()
+            if not line_str:
+                story.append(Spacer(1, 6))
+                continue
+            
+            safe_line = line_str.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            
+            if safe_line.startswith(('"', "'", '“', '‘', '「', '『')):
+                story.append(Paragraph(safe_line, dialogue_style))
+            else:
+                story.append(Paragraph(safe_line, narrative_style))
+
+        doc.build(story, canvasmaker=NumberedCanvas)
+        return send_file(pdf_path, as_attachment=True, download_name=f"{title}.pdf")
+    except Exception as e:
+        print(f"Error exporting PDF: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
