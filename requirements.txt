@@ -1,0 +1,4 @@
+Flask>=2.3.0
+reportlab>=4.0.0
+kiwipiepy>=0.16.0
+gunicorn>=21.0.0
