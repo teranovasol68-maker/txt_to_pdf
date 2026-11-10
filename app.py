@@ -13,7 +13,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# 1. Kiwi 형태소 분석기 안전 초기화 (메모리 사용량 최소화 및 로딩 에러 방지)
+# 1. Kiwi 형태소 분석기 안전 초기화 (메모리 경량화)
 try:
     kiwi = Kiwi(options=0)
 except Exception as e:
@@ -21,17 +21,19 @@ except Exception as e:
     kiwi = None
 
 def register_korean_font():
-    """PDF 출력을 위한 한글 폰트 등록 (프로젝트 내부 fonts 폴더 우선 탐색)"""
+    """
+    한글 PDF 출력을 위한 폰트 등록
+    Render 등 클라우드 환경에서는 프로젝트 내 fonts/NanumGothic.ttf 탐색을 최우선으로 적용
+    """
     font_paths = [
-        "fonts/NanumGothic.ttf",                                # 1순위: 프로젝트 내부에 포함된 폰트 (Render 서버에서 가장 확실함)
+        "fonts/NanumGothic.ttf",                                # 1순위: 프로젝트 내부 포함 폰트 (Render 배포용)
         "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",       # 2순위: 리눅스 시스템 폰트
-        "C:\\Windows\\Fonts\\malgun.ttf",                        # 윈도우 로컬 테스트용
-        "/System/Library/Fonts/Supplemental/AppleGothic.ttf"    # 맥 로컬 테스트용
+        "/usr/share/fonts/nanum/NanumGothic.ttf",
+        "C:\\Windows\\Fonts\\malgun.ttf",                        # 윈도우 로컬
+        "/System/Library/Fonts/Supplemental/AppleGothic.ttf"    # 맥 로컬
     ]
-    
     font_name = "NanumGothic"
     registered = False
-    
     for path in font_paths:
         if os.path.exists(path):
             try:
@@ -40,12 +42,11 @@ def register_korean_font():
                 print(f"Successfully registered font from: {path}")
                 break
             except Exception as e:
-                print(f"Font loading error for {path}: {e}")
+                print(f"Font loading error: {e}")
     
     if not registered:
         print("WARNING: Korean font not found! Fallback to Helvetica.")
         font_name = "Helvetica"
-        
     return font_name
 
 FONT_NAME = register_korean_font()
@@ -76,7 +77,7 @@ class NumberedCanvas(canvas.Canvas):
         self.setLineWidth(0.5)
         self.setStrokeColorRGB(0.8, 0.8, 0.8)
         self.line(40, 800, 555, 800)
-        self.drawString(40, 805, "소설 편집 교정 본문")
+        self.drawString(40, 805, "소설/도서 편집 교정 본문")
 
         self.line(40, 45, 555, 45)
         page_text = f"페이지 {self._pageNumber} / {page_count}"
@@ -85,7 +86,7 @@ class NumberedCanvas(canvas.Canvas):
 
 def fix_korean_spacing_with_kiwi(text):
     """
-    Kiwi 형태소 분석기를 이용한 단어 사전 기반 한글 띄어쓰기 자동 교정
+    Kiwi 형태소 분석기를 이용한 단어 사전 기반 한글 띄어쓰기 및 문장부호 정돈
     """
     if not text.strip():
         return text
@@ -95,8 +96,10 @@ def fix_korean_spacing_with_kiwi(text):
 
     try:
         corrected_text = kiwi.space(text)
+        # 줄임표(…..) 및 다중 마침표 부호 보존 및 공백 교정
+        corrected_text = re.sub(r'\.{3,}', '……', corrected_text)
         corrected_text = re.sub(r'\s+([,.\?!])', r'\1', corrected_text)
-        corrected_text = re.sub(r'([\.?!])([^\s"\'\)\]])', r'\1 \2', corrected_text)
+        corrected_text = re.sub(r'([\.?!])([^\s"\'\)\]…])', r'\1 \2', corrected_text)
         return corrected_text.strip()
     except Exception as e:
         print(f"Spacing error: {e}")
@@ -104,7 +107,7 @@ def fix_korean_spacing_with_kiwi(text):
 
 def process_novel_text(text, options):
     """
-    형태소 분석기 띄어쓰기 교정 + 문장 중간 잘림 연결 + 대화문(" ") 닫는 따옴표 직후 줄바꿈 엔진
+    텍스트 잘림 개행 연결 + 대화문/지문 분리 + 출판용 맞춤법 및 띄어쓰기 교정
     """
     if not text:
         return ""
@@ -115,7 +118,7 @@ def process_novel_text(text, options):
 
     sentence_end_pattern = re.compile(r'[\.?!…"’\'”\)]\s*$')
 
-    # 1. 문장 중간 부자연스럽게 잘린 개행 연결
+    # 1. 부자연스럽게 잘린 문장 개행 연결
     for line in lines:
         stripped = line.strip()
 
@@ -139,7 +142,7 @@ def process_novel_text(text, options):
     if buffer_line:
         merged_lines.append(buffer_line)
 
-    # 2. 대화문(" ") 추출 및 닫는 따옴표 직후 줄바꿈 & Kiwi 사전 기반 띄어쓰기 교정
+    # 2. 대화문 및 지문 구별 / Kiwi 사전 기반 띄어쓰기 적용
     result_paragraphs = []
     dialogue_pair_pattern = re.compile(r'([“"‘「『][^”"’」』]*[”"’」』])')
 
@@ -155,17 +158,14 @@ def process_novel_text(text, options):
             if not part_str:
                 continue
 
-            # 형태소 분석기 기반 띄어쓰기 교정 적용
             if options.get('fix_spacing'):
                 part_str = fix_korean_spacing_with_kiwi(part_str)
 
             is_dialogue = part_str.startswith(('"', "'", '“', '‘', '「', '『'))
 
             if is_dialogue:
-                # 대화문은 통째로 한 줄 배치
                 result_paragraphs.append(part_str)
             elif options.get('split_sentences'):
-                # 일반 지문은 마침표/물음표/느낌표 기준으로 추가 줄바꿈
                 sentences = re.split(r'((?<=[.?!])\s+)', part_str)
                 temp = ""
                 for s in sentences:
@@ -182,7 +182,7 @@ def process_novel_text(text, options):
             else:
                 result_paragraphs.append(part_str)
 
-    # 3. 중복 빈 줄 정리
+    # 3. 중복 빈 줄 정돈
     final_output = []
     prev_empty = False
     for p in result_paragraphs:
@@ -209,7 +209,7 @@ def process():
             'fix_spacing': data.get('fix_spacing', True),
             'clean_paragraphs': data.get('clean_paragraphs', True),
             'separate_dialogue': data.get('separate_dialogue', True),
-            'split_sentences': data.get('split_sentences', True)
+            'split_sentences': data.get('split_sentences', False) # 도서 서문/수필 등은 마침표 무조건 개행보다 문단 유지가 적합
         }
         
         result_text = process_novel_text(raw_text, options)
@@ -222,7 +222,7 @@ def process():
 def export_pdf():
     try:
         data = request.json or {}
-        title = data.get('title', '소설 편집 본문').strip() or '소설 편집 본문'
+        title = data.get('title', '소설/도서 편집 본문').strip() or '소설/도서 편집 본문'
         text = data.get('text', '')
 
         pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], 'novel_export.pdf')
