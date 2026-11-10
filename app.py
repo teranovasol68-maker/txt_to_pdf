@@ -13,7 +13,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# 1. Kiwi 형태소 분석기 안전 초기화 (메모리 경량화)
+# 1. Kiwi 형태소 분석기 안전 초기화
 try:
     kiwi = Kiwi(options=0)
 except Exception as e:
@@ -21,12 +21,9 @@ except Exception as e:
     kiwi = None
 
 def register_korean_font():
-    """
-    한글 PDF 출력을 위한 폰트 등록
-    Render 등 클라우드 환경에서는 프로젝트 내 fonts/NanumGothic.ttf 탐색을 최우선으로 적용
-    """
+    """한글 PDF 출력을 위한 폰트 등록 (Render 내부 fonts 폴더 우선 탐색)"""
     font_paths = [
-        "fonts/NanumGothic.ttf",                                # 1순위: 프로젝트 내부 포함 폰트 (Render 배포용)
+        "fonts/NanumGothic.ttf",                                # 1순위: 프로젝트 내부 폰트 (Render 배포용)
         "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",       # 2순위: 리눅스 시스템 폰트
         "/usr/share/fonts/nanum/NanumGothic.ttf",
         "C:\\Windows\\Fonts\\malgun.ttf",                        # 윈도우 로컬
@@ -77,7 +74,7 @@ class NumberedCanvas(canvas.Canvas):
         self.setLineWidth(0.5)
         self.setStrokeColorRGB(0.8, 0.8, 0.8)
         self.line(40, 800, 555, 800)
-        self.drawString(40, 805, "소설/도서 편집 교정 본문")
+        self.drawString(40, 805, "도서/출판 편집 교정 본문")
 
         self.line(40, 45, 555, 45)
         page_text = f"페이지 {self._pageNumber} / {page_count}"
@@ -85,9 +82,7 @@ class NumberedCanvas(canvas.Canvas):
         self.restoreState()
 
 def fix_korean_spacing_with_kiwi(text):
-    """
-    Kiwi 형태소 분석기를 이용한 단어 사전 기반 한글 띄어쓰기 및 문장부호 정돈
-    """
+    """Kiwi 형태소 분석기를 이용한 단어 사전 기반 한글 띄어쓰기 및 문장부호 정돈"""
     if not text.strip():
         return text
     
@@ -96,7 +91,6 @@ def fix_korean_spacing_with_kiwi(text):
 
     try:
         corrected_text = kiwi.space(text)
-        # 줄임표(…..) 및 다중 마침표 부호 보존 및 공백 교정
         corrected_text = re.sub(r'\.{3,}', '……', corrected_text)
         corrected_text = re.sub(r'\s+([,.\?!])', r'\1', corrected_text)
         corrected_text = re.sub(r'([\.?!])([^\s"\'\)\]…])', r'\1 \2', corrected_text)
@@ -106,27 +100,45 @@ def fix_korean_spacing_with_kiwi(text):
         return text.strip()
 
 def process_novel_text(text, options):
-    """
-    텍스트 잘림 개행 연결 + 대화문/지문 분리 + 출판용 맞춤법 및 띄어쓰기 교정
-    """
+    """텍스트 메타데이터 보호 및 줄바꿈/문단 정돈 엔진"""
     if not text:
         return ""
 
     lines = text.splitlines()
-    merged_lines = []
-    buffer_line = ""
-
-    sentence_end_pattern = re.compile(r'[\.?!…"’\'”\)]\s*$')
-
-    # 1. 부자연스럽게 잘린 문장 개행 연결
+    processed_lines = []
+    
+    # 메타데이터(제목, 지은이, 출판사 등) 패턴 감지 시 줄바꿈 없이 하나의 행으로 병합
+    metadata_buffer = []
+    body_lines = []
+    
+    is_capturing_meta = True
     for line in lines:
         stripped = line.strip()
+        if is_capturing_meta and (not stripped or "지은이" in stripped or "출판사" in stripped or "한국인의 상징세계" in stripped):
+            if stripped:
+                metadata_buffer.append(stripped)
+        else:
+            is_capturing_meta = False
+            body_lines.append(line)
 
+    # 메타데이터가 존재하면 최상단에 줄바꿈 없이 한 줄로 결합
+    if metadata_buffer:
+        combined_meta = "  |  ".join(metadata_buffer)
+        processed_lines.append(combined_meta)
+        processed_lines.append("") # 빈 줄 추가
+
+    # 본문 영역 처리 (부자연스러운 개행 연결 및 띄어쓰기)
+    merged_body = []
+    buffer_line = ""
+    sentence_end_pattern = re.compile(r'[\.?!…"’\'”\)]\s*$')
+
+    for line in body_lines:
+        stripped = line.strip()
         if not stripped:
             if buffer_line:
-                merged_lines.append(buffer_line)
+                merged_body.append(buffer_line)
                 buffer_line = ""
-            merged_lines.append("")
+            merged_body.append("")
             continue
 
         if buffer_line:
@@ -134,67 +146,25 @@ def process_novel_text(text, options):
             if not sentence_end_pattern.search(buffer_line) and not is_new_dialogue:
                 buffer_line += " " + stripped
             else:
-                merged_lines.append(buffer_line)
+                merged_body.append(buffer_line)
                 buffer_line = stripped
         else:
             buffer_line = stripped
 
     if buffer_line:
-        merged_lines.append(buffer_line)
+        merged_body.append(buffer_line)
 
-    # 2. 대화문 및 지문 구별 / Kiwi 사전 기반 띄어쓰기 적용
-    result_paragraphs = []
-    dialogue_pair_pattern = re.compile(r'([“"‘「『][^”"’」』]*[”"’」』])')
-
-    for line in merged_lines:
+    for line in merged_body:
         if not line:
-            result_paragraphs.append("")
+            processed_lines.append("")
             continue
-
-        parts = dialogue_pair_pattern.split(line)
         
-        for part in parts:
-            part_str = part.strip()
-            if not part_str:
-                continue
+        part_str = line.strip()
+        if options.get('fix_spacing'):
+            part_str = fix_korean_spacing_with_kiwi(part_str)
+        processed_lines.append(part_str)
 
-            if options.get('fix_spacing'):
-                part_str = fix_korean_spacing_with_kiwi(part_str)
-
-            is_dialogue = part_str.startswith(('"', "'", '“', '‘', '「', '『'))
-
-            if is_dialogue:
-                result_paragraphs.append(part_str)
-            elif options.get('split_sentences'):
-                sentences = re.split(r'((?<=[.?!])\s+)', part_str)
-                temp = ""
-                for s in sentences:
-                    if not s:
-                        continue
-                    temp += s
-                    if re.search(r'[.?!]$', temp.strip()):
-                        clean_s = temp.strip()
-                        if clean_s:
-                            result_paragraphs.append(clean_s)
-                        temp = ""
-                if temp.strip():
-                    result_paragraphs.append(temp.strip())
-            else:
-                result_paragraphs.append(part_str)
-
-    # 3. 중복 빈 줄 정돈
-    final_output = []
-    prev_empty = False
-    for p in result_paragraphs:
-        if p == "":
-            if not prev_empty:
-                final_output.append("")
-                prev_empty = True
-        else:
-            final_output.append(p)
-            prev_empty = False
-
-    return "\n".join(final_output).strip()
+    return "\n".join(processed_lines).strip()
 
 @app.route('/')
 def index():
@@ -209,7 +179,7 @@ def process():
             'fix_spacing': data.get('fix_spacing', True),
             'clean_paragraphs': data.get('clean_paragraphs', True),
             'separate_dialogue': data.get('separate_dialogue', True),
-            'split_sentences': data.get('split_sentences', False) # 도서 서문/수필 등은 마침표 무조건 개행보다 문단 유지가 적합
+            'split_sentences': data.get('split_sentences', False)
         }
         
         result_text = process_novel_text(raw_text, options)
@@ -222,7 +192,7 @@ def process():
 def export_pdf():
     try:
         data = request.json or {}
-        title = data.get('title', '소설/도서 편집 본문').strip() or '소설/도서 편집 본문'
+        title = data.get('title', '출판 교정 본문').strip() or '출판 교정 본문'
         text = data.get('text', '')
 
         pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], 'novel_export.pdf')
@@ -239,48 +209,67 @@ def export_pdf():
         styles = getSampleStyleSheet()
         
         title_style = ParagraphStyle(
-            'NovelTitle',
+            'BookTitle',
             parent=styles['Heading1'],
             fontName=FONT_NAME,
-            fontSize=20,
-            leading=26,
+            fontSize=18,
+            leading=24,
             alignment=1,
-            spaceAfter=25
+            spaceAfter=20
         )
         
+        meta_style = ParagraphStyle(
+            'BookMeta',
+            parent=styles['Normal'],
+            fontName=FONT_NAME,
+            fontSize=11,
+            leading=16,
+            alignment=1,
+            spaceAfter=25,
+            textColor='#555555'
+        )
+
         narrative_style = ParagraphStyle(
-            'NovelNarrative',
+            'BookNarrative',
             parent=styles['Normal'],
             fontName=FONT_NAME,
             fontSize=10.5,
-            leading=17,
-            firstLineIndent=14,
-            spaceAfter=6,
+            leading=18,
+            firstLineIndent=14,  # 문단 시작 시 들여쓰기 적용
+            spaceAfter=8,
             textColor='#222222'
         )
         
         dialogue_style = ParagraphStyle(
-            'NovelDialogue',
+            'BookDialogue',
             parent=styles['Normal'],
             fontName=FONT_NAME,
             fontSize=10.5,
-            leading=17,
+            leading=18,
             leftIndent=15,
             spaceAfter=8,
             textColor='#003366'
         )
 
-        story = [Paragraph(title, title_style), Spacer(1, 15)]
+        story = [Paragraph(title, title_style), Spacer(1, 10)]
 
         lines = text.splitlines()
+        is_first_lines = True
+        
         for line in lines:
             line_str = line.strip()
             if not line_str:
-                story.append(Spacer(1, 6))
+                story.append(Spacer(1, 8))
                 continue
             
             safe_line = line_str.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             
+            # 메타데이터 라인 처리 (지은이/출판사 포함된 첫 줄)
+            if "지은이" in safe_line or "출판사" in safe_line:
+                story.append(Paragraph(safe_line, meta_style))
+                story.append(Spacer(1, 15))
+                continue
+
             if safe_line.startswith(('"', "'", '“', '‘', '「', '『')):
                 story.append(Paragraph(safe_line, dialogue_style))
             else:
