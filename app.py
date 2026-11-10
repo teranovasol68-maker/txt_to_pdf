@@ -21,26 +21,31 @@ except Exception as e:
     kiwi = None
 
 def register_korean_font():
-    """한글 PDF 출력을 위한 시스템 폰트 등록"""
+    """PDF 출력을 위한 한글 폰트 등록 (프로젝트 내부 fonts 폴더 우선 탐색)"""
     font_paths = [
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-        "/usr/share/fonts/nanum/NanumGothic.ttf",
-        "C:\\Windows\\Fonts\\malgun.ttf",
-        "/System/Library/Fonts/Supplemental/AppleGothic.ttf"
+        "fonts/NanumGothic.ttf",                                # 1순위: 프로젝트 내부에 포함된 폰트 (Render 서버에서 가장 확실함)
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",       # 2순위: 리눅스 시스템 폰트
+        "C:\\Windows\\Fonts\\malgun.ttf",                        # 윈도우 로컬 테스트용
+        "/System/Library/Fonts/Supplemental/AppleGothic.ttf"    # 맥 로컬 테스트용
     ]
+    
     font_name = "NanumGothic"
     registered = False
+    
     for path in font_paths:
         if os.path.exists(path):
             try:
                 pdfmetrics.registerFont(TTFont(font_name, path))
                 registered = True
+                print(f"Successfully registered font from: {path}")
                 break
             except Exception as e:
-                print(f"Font loading error: {e}")
+                print(f"Font loading error for {path}: {e}")
     
     if not registered:
+        print("WARNING: Korean font not found! Fallback to Helvetica.")
         font_name = "Helvetica"
+        
     return font_name
 
 FONT_NAME = register_korean_font()
