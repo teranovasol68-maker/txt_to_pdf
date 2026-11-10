@@ -23,28 +23,33 @@ except Exception as e:
 def register_korean_font():
     """한글 PDF 출력을 위한 시스템 폰트 등록"""
     font_paths = [
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-        "/usr/share/fonts/nanum/NanumGothic.ttf",
-        "C:\\Windows\\Fonts\\malgun.ttf",
-        "/System/Library/Fonts/Supplemental/AppleGothic.ttf"
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",       # Render / Debian / Ubuntu 표준 경로
+        "/usr/share/fonts/nanum/NanumGothic.ttf",                # 일부 리눅스 배포판 경로
+        "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+        "C:\\Windows\\Fonts\\malgun.ttf",                        # 윈도우 로컬 테스트용
+        "/System/Library/Fonts/Supplemental/AppleGothic.ttf"    # 맥 로컬 테스트용
     ]
+    
     font_name = "NanumGothic"
     registered = False
+    
     for path in font_paths:
         if os.path.exists(path):
             try:
                 pdfmetrics.registerFont(TTFont(font_name, path))
                 registered = True
+                print(f"Successfully registered font from: {path}")
                 break
             except Exception as e:
-                print(f"Font loading error: {e}")
+                print(f"Font loading error for {path}: {e}")
     
     if not registered:
+        print("WARNING: Korean font not found! Fallback to Helvetica.")
         font_name = "Helvetica"
+        
     return font_name
 
 FONT_NAME = register_korean_font()
-
 class NumberedCanvas(canvas.Canvas):
     """PDF 하단 페이지 번호 및 상단 구분선 생성"""
     def __init__(self, *args, **kwargs):
@@ -235,36 +240,36 @@ def export_pdf():
         styles = getSampleStyleSheet()
         
         title_style = ParagraphStyle(
-            'NovelTitle',
-            parent=styles['Heading1'],
-            fontName=FONT_NAME,
-            fontSize=20,
-            leading=26,
-            alignment=1,
-            spaceAfter=25
-        )
-        
-        narrative_style = ParagraphStyle(
-            'NovelNarrative',
-            parent=styles['Normal'],
-            fontName=FONT_NAME,
-            fontSize=10.5,
-            leading=17,
-            firstLineIndent=14,
-            spaceAfter=6,
-            textColor='#222222'
-        )
-        
-        dialogue_style = ParagraphStyle(
-            'NovelDialogue',
-            parent=styles['Normal'],
-            fontName=FONT_NAME,
-            fontSize=10.5,
-            leading=17,
-            leftIndent=15,
-            spaceAfter=8,
-            textColor='#003366'
-        )
+        'NovelTitle',
+        parent=styles['Heading1'],
+        fontName=FONT_NAME,  # <--- FONT_NAME 필수 지정
+        fontSize=20,
+        leading=26,
+        alignment=1,
+        spaceAfter=25
+    )
+    
+    narrative_style = ParagraphStyle(
+        'NovelNarrative',
+        parent=styles['Normal'],
+        fontName=FONT_NAME,  # <--- FONT_NAME 필수 지정
+        fontSize=10.5,
+        leading=17,
+        firstLineIndent=14,
+        spaceAfter=6,
+        textColor='#222222'
+    )
+    
+    dialogue_style = ParagraphStyle(
+        'NovelDialogue',
+        parent=styles['Normal'],
+        fontName=FONT_NAME,  # <--- FONT_NAME 필수 지정
+        fontSize=10.5,
+        leading=17,
+        leftIndent=15,
+        spaceAfter=8,
+        textColor='#003366'
+    )
 
         story = [Paragraph(title, title_style), Spacer(1, 15)]
 
