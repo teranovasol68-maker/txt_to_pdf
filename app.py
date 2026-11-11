@@ -84,35 +84,35 @@ class NumberedCanvas(canvas.Canvas):
         self.restoreState()
 
 def fix_korean_spacing_with_kiwi(text):
-    """Kiwi 형태소 분석기를 이용한 띄어쓰기 교정 (메모리 보호 및 안전 장치 적용)"""
-    if not text.strip():
+    """Kiwi 형태소 분석기를 이용한 띄어쓰기 교정 (메모리 폭발 방지 및 안전 분할)"""
+    if not text or not text.strip():
         return text
     
     if kiwi is None:
         return text.strip()
 
     try:
-        # 텍스트가 너무 길면 한 번에 처리할 때 메모리 과부하로 서버가 죽을 수 있으므로 문단별로 분할 처리
-        paragraphs = text.split('\n')
-        corrected_paragraphs = []
+        # 텍스트가 너무 길면 줄 단위로 나누어 순차 처리 (메모리 과부하 방지)
+        lines = text.split('\n')
+        corrected_lines = []
         
-        for p in paragraphs:
-            if not p.strip():
-                corrected_paragraphs.append("")
+        for line in lines:
+            if not line.strip():
+                corrected_lines.append("")
                 continue
             
-            # 너무 긴 문단은 Kiwi 연산 생략 또는 안전 처리하여 서버 다운 방지
-            if len(p) > 2000:
-                corrected_paragraphs.append(p.strip())
+            # 한 줄이 너무 길 경우(2000자 초과) 형태소 분석 생략 후 원본 유지
+            if len(line) > 2000:
+                corrected_lines.append(line.strip())
                 continue
                 
             try:
-                fixed_p = kiwi.space(p)
-                corrected_paragraphs.append(fixed_p)
+                fixed_line = kiwi.space(line)
+                corrected_lines.append(fixed_line)
             except Exception:
-                corrected_paragraphs.append(p.strip())
+                corrected_lines.append(line.strip())
                 
-        corrected_text = "\n".join(corrected_paragraphs)
+        corrected_text = "\n".join(corrected_lines)
         corrected_text = re.sub(r'\.{3,}', '……', corrected_text)
         corrected_text = re.sub(r'\s+([,.\?!])', r'\1', corrected_text)
         corrected_text = re.sub(r'([\.?!])([^\s"\'\)\]…])', r'\1 \2', corrected_text)
@@ -120,7 +120,6 @@ def fix_korean_spacing_with_kiwi(text):
     except Exception as e:
         print(f"Spacing error: {e}")
         return text.strip()
-
 def process_novel_text(text, options):
     """텍스트 메타데이터 보호 및 줄바꿈/문단 정돈 엔진"""
     if not text:
