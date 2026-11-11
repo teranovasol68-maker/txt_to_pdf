@@ -23,7 +23,6 @@ except Exception as e:
 def register_korean_font():
     """KoPub 바탕체 PDF 출력을 위한 폰트 등록 (프로젝트 내부 fonts 폴더 우선 탐색)"""
     font_paths = [
-        "fonts/KoPub Batang Medium.ttf",                         # 1순위: 프로젝트 내부 KoPub 바탕체 (Render 배포용)
         "fonts/NanumGothic.ttf",                                # 백업용 기존 폰트
         "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",       # 2순위: 리눅스 시스템 폰트
         "/usr/share/fonts/nanum/NanumGothic.ttf",
@@ -31,7 +30,7 @@ def register_korean_font():
         "/System/Library/Fonts/Supplemental/AppleGothic.ttf"    # 맥 로컬
     ]
     
-    font_name = "KoPubBatang"
+    font_name = "NanumGothic"
     registered = False
     for path in font_paths:
         if os.path.exists(path):
@@ -49,6 +48,7 @@ def register_korean_font():
     return font_name
 
 FONT_NAME = register_korean_font()
+
 
 class NumberedCanvas(canvas.Canvas):
     """PDF 하단 페이지 번호 및 상단 구분선 생성"""
