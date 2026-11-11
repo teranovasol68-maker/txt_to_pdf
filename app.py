@@ -21,15 +21,17 @@ except Exception as e:
     kiwi = None
 
 def register_korean_font():
-    """한글 PDF 출력을 위한 폰트 등록 (Render 내부 fonts 폴더 우선 탐색)"""
+    """KoPub 바탕체 PDF 출력을 위한 폰트 등록 (프로젝트 내부 fonts 폴더 우선 탐색)"""
     font_paths = [
-        "fonts/NanumGothic.ttf",                                # 1순위: 프로젝트 내부 폰트 (Render 배포용)
+        "fonts/KoPub Batang Medium.ttf",                         # 1순위: 프로젝트 내부 KoPub 바탕체 (Render 배포용)
+        "fonts/NanumGothic.ttf",                                # 백업용 기존 폰트
         "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",       # 2순위: 리눅스 시스템 폰트
         "/usr/share/fonts/nanum/NanumGothic.ttf",
         "C:\\Windows\\Fonts\\malgun.ttf",                        # 윈도우 로컬
         "/System/Library/Fonts/Supplemental/AppleGothic.ttf"    # 맥 로컬
     ]
-    font_name = "NanumGothic"
+    
+    font_name = "KoPubBatang"
     registered = False
     for path in font_paths:
         if os.path.exists(path):
@@ -39,7 +41,7 @@ def register_korean_font():
                 print(f"Successfully registered font from: {path}")
                 break
             except Exception as e:
-                print(f"Font loading error: {e}")
+                print(f"Font loading error for {path}: {e}")
     
     if not registered:
         print("WARNING: Korean font not found! Fallback to Helvetica.")
@@ -107,27 +109,26 @@ def process_novel_text(text, options):
     lines = text.splitlines()
     processed_lines = []
     
-    # 메타데이터(제목, 지은이, 출판사 등) 패턴 감지 시 줄바꿈 없이 하나의 행으로 병합
     metadata_buffer = []
     body_lines = []
     
     is_capturing_meta = True
     for line in lines:
         stripped = line.strip()
-        if is_capturing_meta and (not stripped or "지은이" in stripped or "출판사" in stripped or "한국인의 상징세계" in stripped):
+        if is_capturing_meta and (not stripped or "지은이" in stripped or "출판사" in stripped or len(metadata_buffer) < 3):
             if stripped:
                 metadata_buffer.append(stripped)
+            elif metadata_buffer and not stripped:
+                is_capturing_meta = False
         else:
             is_capturing_meta = False
             body_lines.append(line)
 
-    # 메타데이터가 존재하면 최상단에 줄바꿈 없이 한 줄로 결합
     if metadata_buffer:
         combined_meta = "  |  ".join(metadata_buffer)
         processed_lines.append(combined_meta)
-        processed_lines.append("") # 빈 줄 추가
+        processed_lines.append("")
 
-    # 본문 영역 처리 (부자연스러운 개행 연결 및 띄어쓰기)
     merged_body = []
     buffer_line = ""
     sentence_end_pattern = re.compile(r'[\.?!…"’\'”\)]\s*$')
@@ -192,8 +193,36 @@ def process():
 def export_pdf():
     try:
         data = request.json or {}
-        title = data.get('title', '출판 교정 본문').strip() or '출판 교정 본문'
         text = data.get('text', '')
+
+        book_title = "출판 교정 본문"
+        author_name = ""
+        
+        lines = text.splitlines()
+        meta_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped:
+                meta_lines.append(stripped)
+                if len(meta_lines) >= 3:
+                    break
+
+        if len(meta_lines) > 0:
+            book_title = meta_lines[0]
+        for meta in meta_lines:
+            if "지은이" in meta:
+                parts = meta.split(":")
+                if len(parts) > 1:
+                    author_name = parts[1].strip()
+                else:
+                    author_name = meta.replace("지은이", "").strip()
+
+        if author_name:
+            filename = f"{book_title} - {author_name}.pdf"
+        else:
+            filename = f"{book_title}.pdf"
+            
+        filename = re.sub(r'[\\/*?:"<>|]', "", filename).strip()
 
         pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], 'novel_export.pdf')
         
@@ -235,7 +264,7 @@ def export_pdf():
             fontName=FONT_NAME,
             fontSize=10.5,
             leading=18,
-            firstLineIndent=14,  # 문단 시작 시 들여쓰기 적용
+            firstLineIndent=14,  # 문단 첫 줄 들여쓰기 적용
             spaceAfter=8,
             textColor='#222222'
         )
@@ -251,11 +280,7 @@ def export_pdf():
             textColor='#003366'
         )
 
-        story = [Paragraph(title, title_style), Spacer(1, 10)]
-
-        lines = text.splitlines()
-        is_first_lines = True
-        
+        story = []
         for line in lines:
             line_str = line.strip()
             if not line_str:
@@ -264,10 +289,12 @@ def export_pdf():
             
             safe_line = line_str.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             
-            # 메타데이터 라인 처리 (지은이/출판사 포함된 첫 줄)
+            if line_str == meta_lines[0] if meta_lines else False:
+                story.append(Paragraph(safe_line, title_style))
+                continue
+                
             if "지은이" in safe_line or "출판사" in safe_line:
                 story.append(Paragraph(safe_line, meta_style))
-                story.append(Spacer(1, 15))
                 continue
 
             if safe_line.startswith(('"', "'", '“', '‘', '「', '『')):
@@ -276,7 +303,7 @@ def export_pdf():
                 story.append(Paragraph(safe_line, narrative_style))
 
         doc.build(story, canvasmaker=NumberedCanvas)
-        return send_file(pdf_path, as_attachment=True, download_name=f"{title}.pdf")
+        return send_file(pdf_path, as_attachment=True, download_name=filename)
     except Exception as e:
         print(f"Error exporting PDF: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
