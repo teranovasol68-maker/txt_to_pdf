@@ -162,7 +162,6 @@
             const buffer = e.target.result;
             const bytes = new Uint8Array(buffer);
             
-            // UTF-8 검증 (BOM 체크 및 8비트 멀티바이트 시퀀스 유효성 검사)
             let isUtf8 = true;
             let i = 0;
             
@@ -175,7 +174,7 @@
                     } else if (bytes[i] >= 0xC0 && bytes[i] <= 0xDF) {
                         if (i + 1 >= bytes.length || (bytes[i + 1] & 0xC0) !== 0x80) { isUtf8 = false; break; }
                         i += 2;
-                    } else if (bytes[i] >= 0xE0 && bytes[i] <= 0xEF) {
+                    } else if (bytes[i] >= 0E0 && bytes[i] <= 0xEF) {
                         if (i + 2 >= bytes.length || (bytes[i + 1] & 0xC0) !== 0x80 || (bytes[i + 2] & 0xC0) !== 0x80) { isUtf8 = false; break; }
                         i += 3;
                     } else {
@@ -185,7 +184,6 @@
                 }
             }
 
-            // UTF-8이 아니면 EUC-KR(CP949)로 정제하여 읽기
             const encoding = isUtf8 ? 'utf-8' : 'euc-kr';
             const decoder = new TextDecoder(encoding);
             const decodedText = decoder.decode(buffer);
@@ -218,15 +216,21 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            
+            // 응답 상태 체크 (502 에러 등 방어)
+            if (!response.ok) {
+                throw new Error(`서버 응답 오류 (상태 코드: ${response.status})`);
+            }
+
             const result = await response.json();
             if (result.status === 'success') {
                 document.getElementById('processedText').value = result.processed_text;
             } else {
-                alert('처리 중 오류가 발생했습니다.');
+                alert('처리 중 오류가 발생했습니다: ' + (result.message || ''));
             }
         } catch (err) {
             console.error(err);
-            alert('서버 통신 오류가 발생했습니다.');
+            alert('서버 통신 오류가 발생했습니다. 입력하신 텍스트 분량을 확인해 주세요.');
         }
     }
 
