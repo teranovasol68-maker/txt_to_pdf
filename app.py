@@ -15,7 +15,7 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # 1. Kiwi 형태소 분석기 안전 초기화
 try:
-    kiwi = Kiwi(options=0)
+    kiwi = Kiwi()
 except Exception as e:
     print(f"Kiwi initialization error: {e}")
     kiwi = None
