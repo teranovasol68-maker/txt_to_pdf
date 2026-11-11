@@ -17,8 +17,6 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 try:
     kiwi = Kiwi()
 except Exception as e:
-    print(f"Kiwi initialization error: {e}")
-    kiwi = None
 
 def register_korean_font():
     """KoPub 바탕체 PDF 출력을 위한 폰트 등록 (프로젝트 내부 fonts 폴더 우선 탐색)"""
