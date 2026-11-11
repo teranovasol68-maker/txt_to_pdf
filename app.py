@@ -22,23 +22,24 @@ app = Flask(__name__)
 FONT_NAME = "NanumGothic"
 FONT_PATH = "fonts/NanumGothic.ttf"  # 또는 환경에 맞는 폰트 경로
 
+# PDF 폰트 설정
+FONT_NAME = "NanumGothic"
+FONT_PATH = "fonts/NanumGothic.ttf"
+
 def register_fonts():
+    global FONT_NAME
     try:
         if os.path.exists(FONT_PATH):
             pdfmetrics.registerFont(TTFont(FONT_NAME, FONT_PATH))
             print(f"Successfully registered font from: {FONT_PATH}")
         else:
-            # 폰트 파일이 없으면 기본 폰트(Helvetica) 사용
-            global FONT_NAME
             FONT_NAME = "Helvetica"
             print(f"Font file not found at {FONT_PATH}, using default font.")
     except Exception as e:
-        global FONT_NAME
         FONT_NAME = "Helvetica"
         print(f"Font registration failed: {e}, using default font.")
 
 register_fonts()
-
 def fix_korean_spacing_with_kiwi(text):
     """Kiwi를 이용한 기본적인 띄어쓰기 교정"""
     if not text or not text.strip():
