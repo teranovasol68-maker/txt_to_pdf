@@ -103,6 +103,13 @@
       <label class="f">여백 (mm)<input type="number" id="margin" step="1" min="8" max="40"></label>
       <label class="f">줄 간격 (배)<input type="number" id="line_spacing" step="0.1" min="1" max="3"></label>
       <label class="f">문단 간격 (글자 크기 배)<input type="number" id="para_spacing" step="0.1" min="0" max="2"></label>
+      <label class="f">원문 줄바꿈 처리
+        <select id="join_lines">
+          <option value="auto">자동 감지 (권장)</option>
+          <option value="join">문단으로 합치기 (줄이 강제로 끊긴 txt)</option>
+          <option value="keep">원문 줄바꿈 그대로</option>
+        </select>
+      </label>
     </div>
     <div class="warn" id="fontWarn" hidden></div>
   </div>
@@ -117,7 +124,7 @@
       <label class="check"><input type="checkbox" id="keep_words" checked><span>어절 단위 줄바꿈<small>끄면 글자 단위로 꽉 채웁니다</small></span></label>
       <label class="check"><input type="checkbox" id="chapters" checked><span>챕터 제목 감지 → 북마크(목차)<small>"제1장", "1화", "Chapter 3", "프롤로그" 등</small></span></label>
       <label class="check"><input type="checkbox" id="chapter_newpage"><span>챕터마다 새 페이지에서 시작</span></label>
-      <label class="check"><input type="checkbox" id="join_lines"><span>빈 줄 기준으로 문단 합치기<small>줄이 40자쯤마다 강제로 끊겨 있는 txt일 때 켜세요</small></span></label>
+      <label class="check"><input type="checkbox" id="justify" checked><span>양쪽 정렬 (좌우 여백 맞춤)<small>줄 오른쪽 끝을 가지런히 맞춥니다</small></span></label>
     </div>
   </div>
 
@@ -195,10 +202,10 @@ $("go").addEventListener("click", async () => {
 
   const fd = new FormData();
   fd.append("file", file);
-  for (const id of ["title", "author", "font", "page_size", "font_size", "margin", "line_spacing", "para_spacing"]) {
+  for (const id of ["title", "author", "font", "page_size", "font_size", "margin", "line_spacing", "para_spacing", "join_lines"]) {
     fd.append(id, $(id).value);
   }
-  for (const id of ["cover", "page_numbers", "header", "indent", "keep_words", "chapters", "chapter_newpage", "join_lines"]) {
+  for (const id of ["cover", "page_numbers", "header", "indent", "keep_words", "chapters", "chapter_newpage", "justify"]) {
     fd.append(id, $(id).checked ? "1" : "0");
   }
 
@@ -227,7 +234,7 @@ $("go").addEventListener("click", async () => {
         $("dl").href = "/api/download/" + id;
         const st = s.stats;
         let t = st.pages + "쪽 · " + st.chars.toLocaleString() + "자 · 챕터 " + st.chapters + "개 · " +
-                st.encoding + " · 글꼴 " + st.font + " · " + st.seconds + "초";
+                st.encoding + " · 줄바꿈 " + st.linebreak + " · 글꼴 " + st.font + " · " + st.seconds + "초";
         if (st.missing_glyphs) t += "\n글꼴에 없는 글자 " + st.missing_glyphs + "개는 ?로 바꿨습니다. 다른 글꼴을 선택해 보세요.";
         $("stats").style.whiteSpace = "pre-line";
         $("stats").textContent = t;

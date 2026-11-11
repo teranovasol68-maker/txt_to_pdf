@@ -152,10 +152,42 @@ HEADING_RE = re.compile(
 )
 
 
-def build_items(text: str, join_lines: bool, detect_chapters: bool) -> list[tuple[str, Optional[str]]]:
-    """('p', 문단) / ('h', 제목) / ('b', None=빈 줄) 목록으로 나눈다."""
+_TERMINATORS = (".", "?", "!", "…", "。", '"', "”", "’", "」", "』", ")")
+
+
+def _p95_line_length(text: str) -> int:
+    lens = sorted(len(ln.strip()) for ln in text.split("\n") if ln.strip())
+    return lens[int(len(lens) * 0.95)] if len(lens) >= 30 else 0
+
+
+def detect_hard_wrap(text: str) -> bool:
+    """줄이 일정한 너비(약 20~100자)에서 강제로 끊겨 있는 txt인지 추정한다.
+
+    - 대부분의 줄이 비슷한 길이(최대 길이의 80% 이상)이고
+    - 그런 줄들이 문장 끝(. ? ! 등)으로 끝나는 경우가 드물면 '강제 줄바꿈'으로 본다.
+    한 줄이 한 문단인 일반 소설 txt는 줄 길이가 들쭉날쭉해서 해당되지 않는다.
+    """
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    longest = _p95_line_length(text)
+    if len(lines) < 30 or not (20 <= longest <= 150):
+        return False
+    full = [ln for ln in lines if len(ln) >= longest * 0.8]
+    if len(full) < len(lines) * 0.5:
+        return False
+    return sum(1 for ln in full if ln.endswith(_TERMINATORS)) < len(full) * 0.5
+
+
+def build_items(text: str, join_lines: bool, detect_chapters: bool,
+                blank_breaks: bool = True) -> list[tuple[str, Optional[str]]]:
+    """('p', 문단) / ('h', 제목) / ('b', None=빈 줄) 목록으로 나눈다.
+
+    join_lines=True 이면 연속된 줄을 한 문단으로 합친다. 문단은 다음 경우에 나뉜다:
+    빈 줄 / 들여쓰기로 시작하는 줄 / 짧은 줄(최대 길이의 70% 미만)이 문장 끝으로 끝난 직후
+    """
     items: list[tuple[str, Optional[str]]] = []
     buf: list[str] = []
+    longest = _p95_line_length(text)
+    last_short_end = False
 
     def flush() -> None:
         if buf:
@@ -166,7 +198,9 @@ def build_items(text: str, join_lines: bool, detect_chapters: bool) -> list[tupl
     for raw in text.split("\n"):
         s = raw.strip()
         if not s:
-            flush()
+            if blank_breaks:      # 줄마다 빈 줄이 끼어 있는 파일이면 빈 줄은 문단 구분이 아님
+                flush()
+                last_short_end = False
             if not join_lines and not last_blank:
                 items.append(("b", None))
             last_blank = True
@@ -174,9 +208,14 @@ def build_items(text: str, join_lines: bool, detect_chapters: bool) -> list[tupl
         last_blank = False
         if detect_chapters and len(s) <= 50 and HEADING_RE.match(s):
             flush()
+            last_short_end = False
             items.append(("h", s))
         elif join_lines:
+            indented = len(raw) - len(raw.lstrip()) >= 2
+            if buf and (indented or last_short_end):
+                flush()
             buf.append(s)
+            last_short_end = bool(longest) and len(s) < longest * 0.7 and s.endswith(_TERMINATORS)
         else:
             items.append(("p", s))
     flush()
@@ -250,6 +289,36 @@ def _width_func(font_name: str, size: float) -> Callable[[str], float]:
 # ──────────────────────────────────────────────────────────────
 # 페이지 배치
 # ──────────────────────────────────────────────────────────────
+def _draw_line(c: canvas.Canvas, x: float, y: float, line: str, avail: float,
+               cw: Callable[[str], float], size: float, justify: bool) -> None:
+    """한 줄을 그린다. justify면 줄 폭(avail)에 맞게 어절 간격(+글자 간격)을 늘려 양쪽을 맞춘다."""
+    if not justify:
+        c.drawString(x, y, line)
+        return
+    n = len(line)
+    extra = avail - sum(cw(ch) for ch in line)
+    if extra <= 0.05 or n < 2:
+        c.drawString(x, y, line)
+        return
+    words = line.split(" ")
+    gaps = len(words) - 1
+    gap_extra = min(extra / gaps, size * 0.4) if gaps else 0.0   # 어절 사이에 먼저 분배
+    rest = extra - gap_extra * gaps
+    char_space = rest / (n - 1) if rest > 0.01 else 0.0          # 남는 만큼은 글자 사이에 분배
+    if char_space > size * 0.3:                                  # 너무 듬성듬성해지면 정렬하지 않음
+        c.drawString(x, y, line)
+        return
+    if not gaps:
+        c.drawString(x, y, line, charSpace=char_space)
+        return
+    space_w = cw(" ")
+    cx = x
+    for w in words:
+        if w:
+            c.drawString(cx, y, w, charSpace=char_space)
+        cx += sum(cw(ch) for ch in w) + char_space * len(w) + space_w + char_space + gap_extra
+
+
 class _Book:
     def __init__(self, c: canvas.Canvas, pw: float, ph: float, margin: float, font: str,
                  size: float, line_spacing: float, header_text: str, page_numbers: bool):
@@ -325,7 +394,8 @@ class Options:
     margin_mm: float = 18.0
     page_size: str = "A5"
     indent: bool = True              # 문단 첫 줄 들여쓰기
-    join_lines: bool = False         # 빈 줄 기준으로 문단 합치기 (줄바꿈이 박힌 txt용)
+    join_lines: str = "auto"         # 원문 줄바꿈 처리: auto(자동 감지) / keep(그대로) / join(문단으로 합침)
+    justify: bool = True             # 양쪽 정렬 (좌우 여백 맞춤)
     keep_words: bool = True          # 어절 단위 줄바꿈
     page_numbers: bool = True
     header: bool = True
@@ -410,7 +480,20 @@ def convert(data: bytes, out_path: str, opt: Options, progress: Optional[Progres
         c.showPage()
 
     report(0.03, "문단 나누는 중")
-    items = build_items(text, opt.join_lines, opt.chapters)
+    hard = detect_hard_wrap(text)
+    if opt.join_lines == "join":
+        join, linebreak = True, "문단으로 합침"
+    elif opt.join_lines == "keep":
+        join, linebreak = False, "원문 그대로"
+    elif hard:
+        join, linebreak = True, "문단으로 합침(자동 감지)"
+    else:
+        join, linebreak = False, "원문 그대로(자동 감지)"
+    # 강제로 끊긴 줄마다 빈 줄이 하나씩 끼어 있는 파일(빈 줄 ≥ 줄의 80%)이면 빈 줄을 문단 구분으로 보지 않는다
+    nonblank = sum(1 for ln in text.split("\n") if ln.strip())
+    blank = text.count("\n") + 1 - nonblank
+    blank_breaks = not (join and hard and blank >= 0.8 * nonblank)
+    items = build_items(text, join, opt.chapters, blank_breaks)
 
     book = _Book(c, pw, ph, margin, font_name, size, opt.line_spacing, header_text, opt.page_numbers)
     lh = book.lh
@@ -451,10 +534,14 @@ def convert(data: bytes, out_path: str, opt: Options, progress: Optional[Progres
             pending = 0.0
             continue
 
-        for k, (ln, is_first) in enumerate(wrap(s, width, cw, indent, opt.keep_words)):
+        plines = wrap(s, width, cw, indent, opt.keep_words)
+        last = len(plines) - 1
+        for k, (ln, is_first) in enumerate(plines):
             extra = (para_gap + pending) if k == 0 else 0.0
             y = book.line_y(size, lh, extra=extra)
-            c.drawString(book.ml + (indent if is_first else 0.0), y, ln)
+            off = indent if is_first else 0.0
+            # 문단의 마지막 줄은 왼쪽 정렬, 나머지 줄은 양쪽 정렬
+            _draw_line(c, book.ml + off, y, ln, width - off, cw, size, opt.justify and k < last)
         pending = 0.0
 
     book.finish()
@@ -467,6 +554,7 @@ def convert(data: bytes, out_path: str, opt: Options, progress: Optional[Progres
         "encoding": encoding,
         "font": font["label"],
         "chapters": chapter_count,
+        "linebreak": linebreak,
         "missing_glyphs": missing_count,
         "seconds": round(time.time() - t0, 1),
     }
