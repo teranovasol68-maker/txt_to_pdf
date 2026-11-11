@@ -84,7 +84,7 @@ class NumberedCanvas(canvas.Canvas):
         self.restoreState()
 
 def fix_korean_spacing_with_kiwi(text):
-    """Kiwi 형태소 분석기를 이용한 단어 사전 기반 한글 띄어쓰기 및 문장부호 정돈"""
+    """Kiwi 형태소 분석기를 이용한 띄어쓰기 교정 (메모리 보호 및 안전 장치 적용)"""
     if not text.strip():
         return text
     
@@ -92,7 +92,27 @@ def fix_korean_spacing_with_kiwi(text):
         return text.strip()
 
     try:
-        corrected_text = kiwi.space(text)
+        # 텍스트가 너무 길면 한 번에 처리할 때 메모리 과부하로 서버가 죽을 수 있으므로 문단별로 분할 처리
+        paragraphs = text.split('\n')
+        corrected_paragraphs = []
+        
+        for p in paragraphs:
+            if not p.strip():
+                corrected_paragraphs.append("")
+                continue
+            
+            # 너무 긴 문단은 Kiwi 연산 생략 또는 안전 처리하여 서버 다운 방지
+            if len(p) > 2000:
+                corrected_paragraphs.append(p.strip())
+                continue
+                
+            try:
+                fixed_p = kiwi.space(p)
+                corrected_paragraphs.append(fixed_p)
+            except Exception:
+                corrected_paragraphs.append(p.strip())
+                
+        corrected_text = "\n".join(corrected_paragraphs)
         corrected_text = re.sub(r'\.{3,}', '……', corrected_text)
         corrected_text = re.sub(r'\s+([,.\?!])', r'\1', corrected_text)
         corrected_text = re.sub(r'([\.?!])([^\s"\'\)\]…])', r'\1 \2', corrected_text)
