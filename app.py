@@ -8,19 +8,16 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# Kiwipiepy 형태소 분석기 안전 임포트
+# Kiwipiepy 형태소 분석기 안전 로딩 (메모리 에러 시 서버 다운 방지)
+kiwi = None
 try:
     from kiwipiepy import Kiwi
     kiwi = Kiwi()
+    print("Kiwi initialized successfully.")
 except Exception as e:
-    print(f"Kiwi initialization warning: {e}")
-    kiwi = None
+    print(f"Kiwi initialization skipped or failed: {e}")
 
 app = Flask(__name__)
-
-# PDF 폰트 설정 (나눔고딕 또는 시스템 기본 폰트 적용)
-FONT_NAME = "NanumGothic"
-FONT_PATH = "fonts/NanumGothic.ttf"  # 또는 환경에 맞는 폰트 경로
 
 # PDF 폰트 설정
 FONT_NAME = "NanumGothic"
@@ -40,10 +37,13 @@ def register_fonts():
         print(f"Font registration failed: {e}, using default font.")
 
 register_fonts()
+
 def fix_korean_spacing_with_kiwi(text):
-    """Kiwi를 이용한 띄어쓰기 교정 (메모리 과부하 및 502 에러 방지 안전 장치 적용)"""
+    """Kiwi 띄어쓰기 교정 (메모리 보호 및 안전 장치)"""
     if not text or not text.strip():
         return text
+    
+    # Kiwi 객체가 없거나 메모리 문제 발생 시 원본 반환으로 502 방지
     if kiwi is None:
         return text.strip()
 
@@ -54,8 +54,8 @@ def fix_korean_spacing_with_kiwi(text):
             if not line.strip():
                 corrected_lines.append("")
                 continue
-            # 한 줄이 너무 길면(500자 초과) 형태소 분석 생략 후 원본 유지 (서버 보호)
-            if len(line) > 500:
+            # 300자가 넘는 긴 줄은 Kiwi 분석 생략
+            if len(line) > 300:
                 corrected_lines.append(line.strip())
                 continue
             try:
@@ -69,11 +69,11 @@ def fix_korean_spacing_with_kiwi(text):
         result = re.sub(r'\s+([,.\?!])', r'\1', result)
         return result.strip()
     except Exception as e:
-        print(f"Spacing error: {e}")
+        print(f"Spacing fallback error: {e}")
         return text.strip()
 
 def process_novel_text(text, options):
-    """옵션에 따른 텍스트 정돈 및 가공 (예외 방어 코드 추가)"""
+    """옵션에 따른 텍스트 정돈 및 가공"""
     if not text:
         return ""
         
@@ -97,8 +97,7 @@ def process_novel_text(text, options):
                     cleaned_lines.append(line)
             processed = "\n".join(cleaned_lines)
     except Exception as e:
-        print(f"Text processing inner error: {e}")
-        # 에러 발생 시 서버가 죽지 않고 원본 텍스트를 안전하게 반환
+        print(f"Process text error: {e}")
         return text
 
     return processed
@@ -111,6 +110,9 @@ def index():
 def api_process():
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Invalid JSON data'}), 400
+            
         text = data.get('text', '')
         options = {
             'fix_spacing': data.get('fix_spacing', True),
@@ -122,7 +124,7 @@ def api_process():
         processed_text = process_novel_text(text, options)
         return jsonify({'status': 'success', 'processed_text': processed_text})
     except Exception as e:
-        print(f"Process API error: {e}")
+        print(f"API process error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/export-pdf', methods=['POST'])
@@ -134,7 +136,6 @@ def api_export_pdf():
 
         pdf_path = f"/tmp/{title}.pdf"
         
-        # ReportLab PDF 생성 설정
         doc = SimpleDocTemplate(
             pdf_path,
             pagesize=A4,
@@ -158,7 +159,7 @@ def api_export_pdf():
             fontName=FONT_NAME,
             fontSize=18,
             leading=24,
-            alignment=1, # 가운데 정렬
+            alignment=1,
             spaceAfter=20
         )
 
@@ -172,7 +173,6 @@ def api_export_pdf():
             if not p.strip():
                 story.append(Spacer(1, 10))
             else:
-                # 특수문자 이스케이프 처리
                 safe_p = p.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 story.append(Paragraph(safe_p, story_style))
 
