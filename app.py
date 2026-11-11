@@ -41,21 +41,21 @@ def register_fonts():
 
 register_fonts()
 def fix_korean_spacing_with_kiwi(text):
-    """Kiwi를 이용한 기본적인 띄어쓰기 교정"""
+    """Kiwi를 이용한 띄어쓰기 교정 (메모리 과부하 및 502 에러 방지 안전 장치 적용)"""
     if not text or not text.strip():
         return text
     if kiwi is None:
         return text.strip()
 
     try:
-        # 안전하게 줄 단위로 분할하여 처리
         lines = text.split('\n')
         corrected_lines = []
         for line in lines:
             if not line.strip():
                 corrected_lines.append("")
                 continue
-            if len(line) > 1000:
+            # 한 줄이 너무 길면(500자 초과) 형태소 분석 생략 후 원본 유지 (서버 보호)
+            if len(line) > 500:
                 corrected_lines.append(line.strip())
                 continue
             try:
@@ -73,26 +73,33 @@ def fix_korean_spacing_with_kiwi(text):
         return text.strip()
 
 def process_novel_text(text, options):
-    """옵션에 따른 텍스트 정돈 및 가공"""
+    """옵션에 따른 텍스트 정돈 및 가공 (예외 방어 코드 추가)"""
+    if not text:
+        return ""
+        
     processed = text
 
-    if options.get('fix_spacing', True):
-        processed = fix_korean_spacing_with_kiwi(processed)
+    try:
+        if options.get('fix_spacing', True):
+            processed = fix_korean_spacing_with_kiwi(processed)
 
-    if options.get('clean_paragraphs', True):
-        # 불필요한 연속 공백 및 빈 줄 정리
-        lines = [line.strip() for line in processed.split('\n')]
-        cleaned_lines = []
-        empty_count = 0
-        for line in lines:
-            if not line:
-                empty_count += 1
-                if empty_count <= 2:  # 연속 빈 줄은 최대 2줄까지만 허용
-                    cleaned_lines.append("")
-            else:
-                empty_count = 0
-                cleaned_lines.append(line)
-        processed = "\n".join(cleaned_lines)
+        if options.get('clean_paragraphs', True):
+            lines = [line.strip() for line in processed.split('\n')]
+            cleaned_lines = []
+            empty_count = 0
+            for line in lines:
+                if not line:
+                    empty_count += 1
+                    if empty_count <= 2:
+                        cleaned_lines.append("")
+                else:
+                    empty_count = 0
+                    cleaned_lines.append(line)
+            processed = "\n".join(cleaned_lines)
+    except Exception as e:
+        print(f"Text processing inner error: {e}")
+        # 에러 발생 시 서버가 죽지 않고 원본 텍스트를 안전하게 반환
+        return text
 
     return processed
 
