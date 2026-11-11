@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TXT → PDF 변환기</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1f2328; --sub: #6b7280; --line: #e3e1da;
+    --accent: #2f5d50; --accent-ink: #ffffff; --soft: #eef3f0; --warn: #b45309; --err: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151716; --card: #1e2120; --ink: #e8eae9; --sub: #9aa3a0; --line: #2f3433;
+      --accent: #6fb59f; --accent-ink: #0f1a16; --soft: #26302c; --warn: #f59e0b; --err: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    line-height: 1.55;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 36px 16px 64px; }
+  h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  .lead { color: var(--sub); margin: 0 0 24px; font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  h2 { font-size: 14px; margin: 0 0 12px; color: var(--sub); font-weight: 600; letter-spacing: 0.02em; }
+
+  .drop {
+    display: block; border: 2px dashed var(--line); border-radius: 12px; padding: 28px 16px;
+    text-align: center; cursor: pointer; transition: .15s; background: var(--soft);
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop strong { display: block; font-size: 16px; margin-bottom: 4px; word-break: break-all; }
+  .drop span { color: var(--sub); font-size: 13px; }
+  .drop input { display: none; }
+
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  label.f { display: block; font-size: 13px; color: var(--sub); }
+  label.f > :last-child { margin-top: 5px; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 9px 10px; font: inherit; font-size: 15px; color: var(--ink);
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .checks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 14px; margin-top: 4px; }
+  @media (max-width: 560px) { .checks { grid-template-columns: 1fr; } }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; cursor: pointer; }
+  .check input { margin-top: 4px; accent-color: var(--accent); }
+  .check small { display: block; color: var(--sub); font-size: 12px; }
+
+  button.go {
+    width: 100%; padding: 14px; font: inherit; font-size: 16px; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px;
+  }
+  button.go:disabled { opacity: .5; cursor: not-allowed; }
+
+  .bar { height: 10px; background: var(--soft); border-radius: 99px; overflow: hidden; margin: 14px 0 6px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .msg { font-size: 14px; color: var(--sub); }
+  .err { color: var(--err); font-size: 14px; margin-top: 12px; white-space: pre-wrap; }
+  .warn { color: var(--warn); font-size: 13px; margin-top: 10px; }
+  .result { margin-top: 14px; }
+  .result a.dl {
+    display: inline-block; padding: 12px 20px; background: var(--accent); color: var(--accent-ink);
+    border-radius: 10px; font-weight: 600; text-decoration: none;
+  }
+  .stats { color: var(--sub); font-size: 13px; margin-top: 10px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>TXT → PDF 변환기</h1>
+  <p class="lead">책 한 권 분량의 텍스트 파일도 한 번에 PDF로 바꿔 줍니다. 한글 어절 단위 줄바꿈, 챕터 목차(북마크), 쪽번호를 지원합니다.</p>
+
+  <div class="card">
+    <h2>1. 텍스트 파일 선택</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".txt,text/plain">
+      <strong id="fname">여기를 클릭하거나 .txt 파일을 끌어다 놓으세요</strong>
+      <span id="fmeta">UTF-8 · UTF-16 · CP949(EUC-KR) 인코딩을 자동으로 감지합니다</span>
+    </label>
+  </div>
+
+  <div class="card">
+    <h2>2. 책 정보</h2>
+    <div class="grid">
+      <label class="f">제목 (표지·머리말·파일 이름)<input type="text" id="title" placeholder="파일 이름이 기본값"></label>
+      <label class="f">저자 (선택)<input type="text" id="author"></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. 모양 설정</h2>
+    <div class="grid">
+      <label class="f">글꼴<select id="font"></select></label>
+      <label class="f">용지 크기<select id="page_size"></select></label>
+      <label class="f">글자 크기 (pt)<input type="number" id="font_size" step="0.5" min="6" max="24"></label>
+      <label class="f">여백 (mm)<input type="number" id="margin" step="1" min="8" max="40"></label>
+      <label class="f">줄 간격 (배)<input type="number" id="line_spacing" step="0.1" min="1" max="3"></label>
+      <label class="f">문단 간격 (글자 크기 배)<input type="number" id="para_spacing" step="0.1" min="0" max="2"></label>
+    </div>
+    <div class="warn" id="fontWarn" hidden></div>
+  </div>
+
+  <div class="card">
+    <h2>4. 옵션</h2>
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="cover" checked><span>표지 페이지</span></label>
+      <label class="check"><input type="checkbox" id="page_numbers" checked><span>쪽번호</span></label>
+      <label class="check"><input type="checkbox" id="header" checked><span>머리말에 제목 표시</span></label>
+      <label class="check"><input type="checkbox" id="indent" checked><span>문단 첫 줄 들여쓰기</span></label>
+      <label class="check"><input type="checkbox" id="keep_words" checked><span>어절 단위 줄바꿈<small>끄면 글자 단위로 꽉 채웁니다</small></span></label>
+      <label class="check"><input type="checkbox" id="chapters" checked><span>챕터 제목 감지 → 북마크(목차)<small>"제1장", "1화", "Chapter 3", "프롤로그" 등</small></span></label>
+      <label class="check"><input type="checkbox" id="chapter_newpage"><span>챕터마다 새 페이지에서 시작</span></label>
+      <label class="check"><input type="checkbox" id="join_lines"><span>빈 줄 기준으로 문단 합치기<small>줄이 40자쯤마다 강제로 끊겨 있는 txt일 때 켜세요</small></span></label>
+    </div>
+  </div>
+
+  <button class="go" id="go" disabled>PDF로 변환</button>
+
+  <div class="card" id="status" hidden style="margin-top:16px">
+    <div class="msg" id="msg">준비 중…</div>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="err" id="err" hidden></div>
+    <div class="result" id="result" hidden>
+      <a class="dl" id="dl" href="#">PDF 다운로드</a>
+      <div class="stats" id="stats"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let file = null, titleTouched = false, polling = null;
+
+function fmtSize(n) {
+  return n < 1024 * 1024 ? (n / 1024).toFixed(0) + " KB" : (n / 1024 / 1024).toFixed(1) + " MB";
+}
+
+function setFile(f) {
+  if (!f) return;
+  file = f;
+  $("fname").textContent = f.name;
+  $("fmeta").textContent = fmtSize(f.size) + " · 다른 파일로 바꾸려면 다시 클릭";
+  if (!titleTouched) $("title").value = f.name.replace(/\.[^.]+$/, "");
+  $("go").disabled = false;
+}
+
+async function init() {
+  const cfg = await (await fetch("/api/config")).json();
+  for (const f of cfg.fonts) $("font").add(new Option(f.label, f.id));
+  for (const p of cfg.page_sizes) $("page_size").add(new Option(p.label, p.id));
+  const d = cfg.defaults;
+  $("font_size").value = d.font_size;
+  $("line_spacing").value = d.line_spacing;
+  $("para_spacing").value = d.para_spacing;
+  $("margin").value = d.margin;
+  $("page_size").value = d.page_size;
+  if (!cfg.fonts.length) {
+    $("fontWarn").hidden = false;
+    $("fontWarn").textContent = "한글 글꼴을 찾지 못했습니다. app.py 옆 fonts 폴더에 NanumGothic.ttf 같은 TrueType(.ttf) 한글 글꼴을 넣고 서버를 다시 시작하세요.";
+    $("font").disabled = true;
+  }
+}
+
+$("title").addEventListener("input", () => { titleTouched = true; });
+$("file").addEventListener("change", (e) => setFile(e.target.files[0]));
+const drop = $("drop");
+["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => setFile(e.dataTransfer.files[0]));
+
+function showError(text) {
+  $("status").hidden = false;
+  $("err").hidden = false;
+  $("err").textContent = text;
+  $("msg").textContent = "변환하지 못했습니다";
+  $("go").disabled = false;
+}
+
+$("go").addEventListener("click", async () => {
+  if (!file) return;
+  clearInterval(polling);
+  $("go").disabled = true;
+  $("status").hidden = false;
+  $("err").hidden = true;
+  $("result").hidden = true;
+  $("bar").style.width = "0%";
+  $("msg").textContent = "파일 업로드 중…";
+
+  const fd = new FormData();
+  fd.append("file", file);
+  for (const id of ["title", "author", "font", "page_size", "font_size", "margin", "line_spacing", "para_spacing"]) {
+    fd.append(id, $(id).value);
+  }
+  for (const id of ["cover", "page_numbers", "header", "indent", "keep_words", "chapters", "chapter_newpage", "join_lines"]) {
+    fd.append(id, $(id).checked ? "1" : "0");
+  }
+
+  let res, body;
+  try {
+    res = await fetch("/api/convert", { method: "POST", body: fd });
+    body = await res.json();
+  } catch (e) {
+    return showError("서버에 연결하지 못했습니다.");
+  }
+  if (!res.ok) return showError(body.error || "업로드에 실패했습니다.");
+
+  const id = body.job_id;
+  polling = setInterval(async () => {
+    try {
+      const r = await fetch("/api/status/" + id);
+      const s = await r.json();
+      if (!r.ok) { clearInterval(polling); return showError(s.error); }
+      $("bar").style.width = Math.round(s.progress * 100) + "%";
+      $("msg").textContent = s.message + " (" + Math.round(s.progress * 100) + "%)";
+      if (s.state === "error") { clearInterval(polling); showError(s.error); }
+      if (s.state === "done") {
+        clearInterval(polling);
+        $("go").disabled = false;
+        $("msg").textContent = "변환 완료!";
+        $("dl").href = "/api/download/" + id;
+        const st = s.stats;
+        let t = st.pages + "쪽 · " + st.chars.toLocaleString() + "자 · 챕터 " + st.chapters + "개 · " +
+                st.encoding + " · 글꼴 " + st.font + " · " + st.seconds + "초";
+        if (st.missing_glyphs) t += "\n글꼴에 없는 글자 " + st.missing_glyphs + "개는 ?로 바꿨습니다. 다른 글꼴을 선택해 보세요.";
+        $("stats").style.whiteSpace = "pre-line";
+        $("stats").textContent = t;
+        $("result").hidden = false;
+        $("dl").click();
+      }
+    } catch (e) { /* 일시적 오류는 다음 폴링에서 재시도 */ }
+  }, 600);
+});
+
+init();
+</script>
+</body>
+</html>
